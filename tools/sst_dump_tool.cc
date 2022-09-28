@@ -813,10 +813,10 @@ int SSTDumpTool::Run(int argc, char** argv, Options options) {
 
 
           for (const auto& kv : table_properties->user_collected_properties) {
-//            if("rocksdb.external_sst_file.global_seqno"== kv.first){
-//              auto mutable_kv = const_cast<std::pair<const std::string,std::string>*>(&kv);
-//              mutable_kv->second = "0";
-//            }
+            if("rocksdb.external_sst_file.global_seqno"== kv.first){
+              auto mutable_kv = const_cast<std::pair<const std::string,std::string>*>(&kv);
+              mutable_kv->second = "0";
+            }
             std::string prop_name = kv.first;
             std::string prop_val = Slice(kv.second).ToString(true);
             fprintf(stdout, "  # %s: 0x%s\n", prop_name.c_str(),
