@@ -121,6 +121,8 @@ class ExternalSstFileIngestionJob {
   // How many sequence numbers did we consume as part of the ingest job?
   int ConsumedSequenceNumbersCount() const { return consumed_seqno_count_; }
 
+  friend class SSTDumpTool;
+
  private:
   // Open the external file and populate `file_to_ingest` with all the
   // external information we need to ingest this file.

@@ -212,6 +212,7 @@ Status ExternalSstFileIngestionJob::Run() {
   if (ingestion_options_.snapshot_consistency && !db_snapshots_->empty()) {
     // We need to assign a global sequence number to all the files even
     // if the dont overlap with any ranges since we have snapshots
+    //有快照则force分配全局global
     force_global_seqno = true;
   }
   // It is safe to use this instead of LastAllocatedSequence since we are
@@ -377,6 +378,7 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
   sst_file_reader.reset(new RandomAccessFileReader(std::move(sst_file),
                                                    external_file));
 
+
   status = cfd_->ioptions()->table_factory->NewTableReader(
       TableReaderOptions(*cfd_->ioptions(),
                          sv->mutable_cf_options.prefix_extractor.get(),
@@ -400,6 +402,7 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
   }
 
   // Get the external file properties
+  //读取sst信息到内存中
   auto props = table_reader->GetTableProperties();
   const auto& uprops = props->user_collected_properties;
 
@@ -422,11 +425,14 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
     file_to_ingest->original_seqno = DecodeFixed64(seqno_iter->second.c_str());
     auto offsets_iter = props->properties_offsets.find(
         ExternalSstFilePropertyNames::kGlobalSeqno);
+    //如果找不到或偏移量为0
     if (offsets_iter == props->properties_offsets.end() ||
         offsets_iter->second == 0) {
+      //置为0，立刻返回
       file_to_ingest->global_seqno_offset = 0;
       return Status::Corruption("Was not able to find file global seqno field");
     }
+    //否则偏移量赋值
     file_to_ingest->global_seqno_offset = static_cast<size_t>(offsets_iter->second);
   } else if (file_to_ingest->version == 1) {
     // SST file V1 should not have global seqno field
