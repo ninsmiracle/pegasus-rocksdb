@@ -466,6 +466,10 @@ void print_help() {
     --input_key_hex
       Can be combined with --from and --to to indicate that these values are encoded in Hex
 
+    --reset_global_seqno
+      Sometimes rocksDB may change global_seqno unexpected,and before the ingestion rocksDB will check it and throw an error information.
+      So this rocksDB bug may make origin SST file broken.Try to use reset_global_seqno to recover the target SST file.
+
     --show_properties
       Print table properties after iterating over the file when executing
       check|scan|raw
@@ -540,6 +544,8 @@ int SSTDumpTool::Run(int argc, char** argv, Options options) {
   bool show_properties = false;
   bool show_summary = false;
   bool set_block_size = false;
+  bool reset_global_seqno = false;
+
   std::string from_key;
   std::string to_key;
   std::string block_size_str;
@@ -581,7 +587,9 @@ int SSTDumpTool::Run(int argc, char** argv, Options options) {
       show_properties = true;
     } else if (strcmp(argv[i], "--show_summary") == 0) {
       show_summary = true;
-    } else if (strncmp(argv[i], "--set_block_size=", 17) == 0) {
+    }else if(strcmp(argv[i], "--reset_global_seqno") == 0){
+      reset_global_seqno = true;
+    }else if (strncmp(argv[i], "--set_block_size=", 17) == 0) {
       set_block_size = true;
       block_size_str = argv[i] + 17;
       std::istringstream iss(block_size_str);
@@ -785,38 +793,11 @@ int SSTDumpTool::Run(int argc, char** argv, Options options) {
                   "Raw user collected properties\n"
                   "------------------------------\n");
 
-          ///try to change the file global seqno
-
-          //获取global_seqno的偏移量
-          IngestedFileInfo file_to_ingest;
-          Status status = SetSstGlobalSeqno(file_to_ingest,table_properties_from_reader);
-          unsigned long seqno = 0;
-
-          //已默认的env选项可写打开文件
-          std::unique_ptr<RandomRWFile> rwfile;
-          EnvOptions env_options;
-          status = env->NewRandomRWFile(filename,&rwfile, env_options);
-
-          if (status.ok()) {
-            std::string seqno_val;
-            PutFixed64(&seqno_val, seqno);
-            status = rwfile->Write(file_to_ingest.global_seqno_offset, seqno_val);
-            if (status.ok()) {
-              fprintf(stdout, "change the SstFile global_seqno success\n");
-            }
-            if (!status.ok()) {
-              fprintf(stderr, "FAILED when change global_seqno\n");
-            }
-          } else {
-            fprintf(stderr, "CAN NOT open target sst file path\n");
-          }
-
-
           for (const auto& kv : table_properties->user_collected_properties) {
-            if("rocksdb.external_sst_file.global_seqno"== kv.first){
-              auto mutable_kv = const_cast<std::pair<const std::string,std::string>*>(&kv);
-              mutable_kv->second = "0";
-            }
+//            if("rocksdb.external_sst_file.global_seqno"== kv.first){
+//              auto mutable_kv = const_cast<std::pair<const std::string,std::string>*>(&kv);
+//              mutable_kv->second = "0";
+//            }
             std::string prop_name = kv.first;
             std::string prop_val = Slice(kv.second).ToString(true);
             fprintf(stdout, "  # %s: 0x%s\n", prop_name.c_str(),
@@ -827,6 +808,45 @@ int SSTDumpTool::Run(int argc, char** argv, Options options) {
         fprintf(stderr, "Reader unexpectedly returned null properties\n");
       }
     }
+
+    if(reset_global_seqno){
+      std::shared_ptr<const rocksdb::TableProperties> table_properties_from_reader;
+      ///这里仍然使用了旧的open逻辑
+      st = dumper.ReadTableProperties(&table_properties_from_reader);
+      if (!st.ok()) {
+        fprintf(stderr, "%s: %s\n", filename.c_str(), st.ToString().c_str());
+        fprintf(stderr, "Try to use initial table properties\n");
+      }
+
+      ///try to change the file global seqno
+
+      //获取global_seqno的偏移量
+      IngestedFileInfo file_to_ingest;
+      Status status = SetSstGlobalSeqno(file_to_ingest,table_properties_from_reader);
+      unsigned long seqno = 0;
+
+      //已默认的env选项可写打开文件
+      std::unique_ptr<RandomRWFile> rwfile;
+      EnvOptions env_options;
+      status = env->NewRandomRWFile(filename,&rwfile, env_options);
+
+      if (status.ok()) {
+        std::string seqno_val;
+        PutFixed64(&seqno_val, seqno);
+        status = rwfile->Write(file_to_ingest.global_seqno_offset, seqno_val);
+        if (status.ok()) {
+          fprintf(stdout, "***change the SstFile global_seqno to zero success***\n");
+        }
+        if (!status.ok()) {
+          fprintf(stderr, "FAILED when change global_seqno\n");
+        }
+      } else {
+        fprintf(stderr, "CAN NOT open target sst file path\n");
+      }
+
+    }
+
+
   }
   if (show_summary) {
     fprintf(stdout, "total number of files: %" PRIu64 "\n", total_num_files);
@@ -841,14 +861,6 @@ int SSTDumpTool::Run(int argc, char** argv, Options options) {
   }
   return 0;
 }
-
-
-
-
-
-
-
-
 
 
 }  // namespace rocksdb
